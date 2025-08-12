@@ -424,17 +424,17 @@ volume.save()
 
 ![cinder_api](cinder_api.png)
 
-### 6. RBDDriver
+## 6. RBDDriver
 
 `cinder-volume`最后调用的是配置中对应后端的`api`，对于`ceph`后端就是`volume.drivers.rbd.RBDDriver`。
 
-#### 6.1 create_volume
+### 6.1 create_volume
 
-`volume.drivers.rbd.RBDDriver.create_volume`的核心是通过`RADOSClient(self)`拿到连接`Ceph`集群的客户端，从而获取`client.ioctx`，它指向`Ceph`中的某个`pool`，最后通过调用`self.RBDProxy().create`调用`librbd`的`create`方法，在指定`pool`中创建一个`RBD Image`。
+`volume.drivers.rbd.RBDDriver.create_volume`的核心是通过`RADOSClient(self)`拿到连接`Ceph`集群的客户端，即`librados`的客户端，从而获取`client.ioctx`，它指向`Ceph`中的某个`pool`，最后通过调用`self.RBDProxy().create`调用`librbd`的`create`方法，在指定`pool`中创建一个`RBD Image`。
 
 `self.RBDProxy()`返回了一个异步包装后的`RBD`对象`tpool.Proxy(self.rbd.RBD())`，实际上就是`python-rbd`中的管理`RBD image`的`RBD`类，而`python-rbd`就调用了`librbd C API rbd_create()`。
 
-#### 6.2 create_volume_from_snapshot
+### 6.2 create_volume_from_snapshot
 
 核心是调用`_clone`方法创建基于快照的克隆卷，然后如果设置了`use_quota`并在配置中启用了`flatten`就会调用`_flatten`方法，最后如果进行根据新卷是否加密计算不同的`new_size`进行扩容`_resize`。
 
@@ -443,4 +443,65 @@ volume.save()
 `_flatten`是一个调度接口，它调用了`_do_flatten`，`_do_flatten`内部真正的调用了`RBD.flatten`。`RBD`中的快照克隆是基于`COW (Copy-On-Write)`实现的，克隆卷会依赖源快照，具体来说它引用了原快照的数据块，如果源快照被删除那么新卷数据有可能会丢失。而`flatten`会把所有的数据复制，变成完全独立存储的数据。
 
 ![snapshot](snapshot.png)
+
+### 6.3 create_cloned_volume
+
+基于源卷`src_vref`创建出新卷。如果不允许使用克隆链，那么直接调用`Image.copy`复制完整数据，花费更多时间和空间。默认使用克隆链，首先通过`RADOSClient`来获取得到`ceph`集群连接和`ioctx`，然后通过`self.rbd.Image`也就是`RBD.Image`得到源卷`src_volume`，然后给源卷创建一个快照`src_volume.create_snap(clone_snap)`，同时保护快照`src_volume.protect_snap(clone_snap)`，最后调用`self.RBDProxy().clone`将源卷的快照克隆成一个新的卷到目标卷，这个克隆操作是`COW`的。克隆完成后，再删除临时快照。
+
+![clone](clone.png)
+
+### 6.4 clone_image
+
+首先会解析`Glance`镜像中的多个后端的`URL`，对每个支持克隆的`url_location`提取出对应的`pool, image, snapshot`，然后调用`self._clone`基于快照进行克隆卷。
+
+### 6.5 从备份创建卷
+
+`librbd`没有从备份创建卷的接口，备份由`cinder-backup`实现，通过创建空卷然后写入数据实现的。
+
+## 7. Create Snapshot
+
+创建快照的流程和创建卷类似都是由`client -> cinder-api -> cinder-scheduler -> cinder-volume`。
+
+### 7.1 入口
+
+`cinder.api.v3.snapshots.SnapshotsController.create`函数接收来自`client`的请求并验证请求参数。
+
+1. 首先取到本次请求的上下文`context = req.environ['cinder.context']`，包含权限以及认证等。
+2. 取快照的信息，包括元数据`snapshot.get('metadata', None)`， 关联卷`volume_id = snapshot['volume_id']`，然后通过`self.volume_api.get(context, volume_id)`取到该卷对象。
+3. 如果强制创建快照`force_flag = snapshot.get('force')`， 默认是`False`，调用`self.volume_api.create_snapshot_force`，否则正常创建快照`self.volume_api.create_snapshot`。
+4. 将新创建的快照`new_snapshot`缓存到数据库，以便后续使用。最后返回快照视图`self._view_builder.detail(req, new_snapshot)`给客户端。
+
+### 7.2 volume.api.API.create_snapshot
+
+`create_snapshot_force`和`create_snapshot`核心都是调用`_create_snapshot`，强制快照创建会忽略当前卷的状态，不管卷是否在用，而`create_snapshot`会根据如果`allow_in_use=False`，卷正在使用就会拒绝创建快照。
+
+`_create_snapshot`首先会断言判断卷是否被冻结`volume.assert_not_frozen()`，然后会创建快照的数据库记录`create_snapshot_in_db`同时会做很多逻辑检查，包括卷是否允许创建快照、卷状态是否合法、卷组操作等。最后核心是调用`self.scheduler_rpcapi.create_snapshot`给`scheduler`通知创建数据库。
+
+### 7.3 cinder-scheduler
+
+#### 7.3.1 接口
+
+`scheduler.rpcapi.SchedulerAPI.create_snapshot`负责发起`RPC`请求。首先通过`rpc.RPCAPI._get_cctxt()`获取`RPC`客户端上下文，`scheduler.rpcapi.SchedulerAPI`继承了`rpc.RPCAPI`，并设置了`TOPIC = constants.SCHEDULER_TOPIC`，最后通过这个上下文`cctxt`向`sceduler`的消息队列发起`create_snapshot`的调用请求。
+
+#### 7.3.2 调度
+
+`scheduler.manager.SchedulerManager.create_snapshot`接收到请求后，首先等待调度器是否就绪`self._wait_for_scheduler()`，然后验证存储后端是否满足过滤条件`tgt_backend = self.driver.backend_passes_filters`，并对该后端资源预占用`tgt_backend.consume_from_volume`，成功后调用`volume.rpcapi.VolumeAPI.create_snapshot`准备`RPC`调用。
+
+### 7.4 cinder-volume
+
+#### 7.4.1 接口
+
+调度器调度结束后，通过`volume.rpcapi.VolumeAPI.create_snapshot`进行`RPC`调用`volume`的后端服务`create_snapshot`。同样的，`VolumeAPI(rpc.RPCAPI)`的`TOPIC = constants.VOLUME_TOPIC`。
+
+#### 7.4.2 创建快照
+
+`volume.manager.VolumeManager.create_snapshot`接收到调用请求，提权并通知开始创建快照`self._notify_about_snapshot_usage(context, snapshot, "create.start")`。创建快照的核心是检查驱动是否初始化成功
+
+`volume_utils.require_driver_initialized(self.driver)`，调用存储后端驱动的`self.driver.create_snapshot`。和创建卷类似，最后更新数据库，镜像元数据同步，状态切换并发出通知`self._notify_about_snapshot_usage(context, snapshot, "create.end")`。
+
+### 7.5. RBDDriver
+
+通过`RBDVolumeProxy(self, snapshot.volume_name)`得到卷的操作句柄，调用`RBD.Image`的`create_snap`和`protect_snap`创建快照并防止快照被误删除。相对从源卷创建卷，`volume.drivers.rbd.RBDDriver.create_snapshot`更加简单，不需要管理快照的生命周期。
+
+
 
