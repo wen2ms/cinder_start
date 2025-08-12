@@ -1,0 +1,49 @@
+<mxfile host="Electron" agent="Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) draw.io/28.0.6 Chrome/138.0.7204.100 Electron/37.2.3 Safari/537.36" version="28.0.6">
+  <diagram name="Page-1" id="AFOIVf7qyZ-ONPZw_x9m">
+    <mxGraphModel dx="946" dy="679" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="850" pageHeight="1100" math="0" shadow="0">
+      <root>
+        <mxCell id="0" />
+        <mxCell id="1" parent="0" />
+        <mxCell id="MRPKqaXWRI1w1VLuz8vo-1" value="" style="shape=curlyBracket;whiteSpace=wrap;html=1;rounded=1;labelPosition=left;verticalLabelPosition=middle;align=right;verticalAlign=middle;sketch=1;hachureGap=4;jiggle=2;curveFitting=1;fontFamily=Times New Roman;fontSize=17;fillColor=#dae8fc;strokeColor=#6c8ebf;" parent="1" vertex="1">
+          <mxGeometry x="150" y="210" width="20" height="250" as="geometry" />
+        </mxCell>
+        <mxCell id="MRPKqaXWRI1w1VLuz8vo-2" value="1. 权限检查（通过镜像创建）" style="text;html=1;align=center;verticalAlign=middle;resizable=0;points=[];autosize=1;strokeColor=none;fillColor=none;fontFamily=Times New Roman;fontSize=17;" parent="1" vertex="1">
+          <mxGeometry x="170" y="220" width="240" height="30" as="geometry" />
+        </mxCell>
+        <mxCell id="MRPKqaXWRI1w1VLuz8vo-3" value="2. 卷大小检查" style="text;html=1;align=center;verticalAlign=middle;resizable=0;points=[];autosize=1;strokeColor=none;fillColor=none;fontFamily=Times New Roman;fontSize=17;" parent="1" vertex="1">
+          <mxGeometry x="170" y="270" width="130" height="30" as="geometry" />
+        </mxCell>
+        <mxCell id="MRPKqaXWRI1w1VLuz8vo-4" value="3. 指定卷类型是否在一致性组中" style="text;html=1;align=center;verticalAlign=middle;resizable=0;points=[];autosize=1;strokeColor=none;fillColor=none;fontFamily=Times New Roman;fontSize=17;" parent="1" vertex="1">
+          <mxGeometry x="170" y="320" width="260" height="30" as="geometry" />
+        </mxCell>
+        <mxCell id="MRPKqaXWRI1w1VLuz8vo-5" value="4. 指定卷与源卷（快照）类型兼容性检查" style="text;html=1;align=center;verticalAlign=middle;resizable=0;points=[];autosize=1;strokeColor=none;fillColor=none;fontFamily=Times New Roman;fontSize=17;" parent="1" vertex="1">
+          <mxGeometry x="170" y="378" width="330" height="30" as="geometry" />
+        </mxCell>
+        <mxCell id="MRPKqaXWRI1w1VLuz8vo-6" value="5. 元数据格式检查" style="text;html=1;align=center;verticalAlign=middle;resizable=0;points=[];autosize=1;strokeColor=none;fillColor=none;fontFamily=Times New Roman;fontSize=17;" parent="1" vertex="1">
+          <mxGeometry x="170" y="430" width="160" height="30" as="geometry" />
+        </mxCell>
+        <mxCell id="MRPKqaXWRI1w1VLuz8vo-8" value="&lt;font&gt;volume.api.&lt;/font&gt;&lt;div&gt;&lt;font&gt;create&lt;/font&gt;&lt;/div&gt;" style="rounded=1;whiteSpace=wrap;html=1;sketch=1;hachureGap=4;jiggle=2;curveFitting=1;fontFamily=Times New Roman;fillColor=#dae8fc;strokeColor=#6c8ebf;fontSize=17;" parent="1" vertex="1">
+          <mxGeometry x="30" y="305" width="120" height="60" as="geometry" />
+        </mxCell>
+        <mxCell id="MRPKqaXWRI1w1VLuz8vo-11" value="create_volume.&lt;div&gt;get_flow&lt;/div&gt;" style="shape=step;perimeter=stepPerimeter;whiteSpace=wrap;html=1;fixedSize=1;sketch=1;hachureGap=4;jiggle=2;curveFitting=1;fontFamily=Times New Roman;fontSize=17;fillColor=#cce5ff;strokeColor=#36393d;" parent="1" vertex="1">
+          <mxGeometry x="420" y="305" width="150" height="65" as="geometry" />
+        </mxCell>
+        <mxCell id="MRPKqaXWRI1w1VLuz8vo-12" value="flow_name&lt;div&gt;volume_create_api&lt;/div&gt;" style="swimlane;whiteSpace=wrap;html=1;sketch=1;hachureGap=4;jiggle=2;curveFitting=1;fontFamily=Times New Roman;fontSize=17;fillColor=#f0a30a;strokeColor=#BD7000;fontColor=#000000;startSize=40;" parent="1" vertex="1">
+          <mxGeometry x="580" y="240" width="240" height="200" as="geometry" />
+        </mxCell>
+        <mxCell id="MRPKqaXWRI1w1VLuz8vo-13" value="1. ExtractVolumeRequestTask" style="text;html=1;align=center;verticalAlign=middle;resizable=0;points=[];autosize=1;strokeColor=none;fillColor=none;fontFamily=Times New Roman;fontSize=17;" parent="MRPKqaXWRI1w1VLuz8vo-12" vertex="1">
+          <mxGeometry x="5" y="40" width="230" height="30" as="geometry" />
+        </mxCell>
+        <mxCell id="MRPKqaXWRI1w1VLuz8vo-14" value="2. QuotaReserveTask" style="text;html=1;align=center;verticalAlign=middle;resizable=0;points=[];autosize=1;strokeColor=none;fillColor=none;fontFamily=Times New Roman;fontSize=17;" parent="MRPKqaXWRI1w1VLuz8vo-12" vertex="1">
+          <mxGeometry x="35" y="80" width="170" height="30" as="geometry" />
+        </mxCell>
+        <mxCell id="MRPKqaXWRI1w1VLuz8vo-15" value="3. EntryCreateTask" style="text;html=1;align=center;verticalAlign=middle;resizable=0;points=[];autosize=1;strokeColor=none;fillColor=none;fontFamily=Times New Roman;fontSize=17;" parent="MRPKqaXWRI1w1VLuz8vo-12" vertex="1">
+          <mxGeometry x="45" y="120" width="150" height="30" as="geometry" />
+        </mxCell>
+        <mxCell id="MRPKqaXWRI1w1VLuz8vo-16" value="4. QuotaCommitTask" style="text;html=1;align=center;verticalAlign=middle;resizable=0;points=[];autosize=1;strokeColor=none;fillColor=none;fontFamily=Times New Roman;fontSize=17;" parent="MRPKqaXWRI1w1VLuz8vo-12" vertex="1">
+          <mxGeometry x="35" y="160" width="170" height="30" as="geometry" />
+        </mxCell>
+      </root>
+    </mxGraphModel>
+  </diagram>
+</mxfile>

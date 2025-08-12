@@ -35,3 +35,11 @@ class Invalid(BinderException):
 
 class InvalidInput(Invalid):
     message = "Invalid input received: %(reason)s"
+
+
+class InvalidInputMetadata(Invalid):
+    message = "Invalid metadata: %(reason)s"
+
+
+class InvalidInputMetadataSize(Invalid):
+    message = "Invalid metadata size: %(reason)s"
