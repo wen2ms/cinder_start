@@ -503,5 +503,132 @@ volume.save()
 
 通过`RBDVolumeProxy(self, snapshot.volume_name)`得到卷的操作句柄，调用`RBD.Image`的`create_snap`和`protect_snap`创建快照并防止快照被误删除。相对从源卷创建卷，`volume.drivers.rbd.RBDDriver.create_snapshot`更加简单，不需要管理快照的生命周期。
 
+## 8. Create Backup
+
+### 8.1. 入口
+
+创建备份的`Rest API`入口在`cinder.api.contrib.backups.BackupsController.create`函数。首先接受，解析`HTTP`请求的参数，包括备份存储的容器`container`，要备份的卷`volume_id`，以及备份模式是否是增量备份`incremental`，是否强制备份`force`，默认都是`False`。元数据`metadata`和可用区`availability_zone`，最后调用`self.backup_api.create`，然后直接异步返回响应体`self._view_builder.summary`给客户端，包含状态码`202 Accepted`，对应的装饰器是`@wsgi.response(HTTPStatus.ACCEPTED)`。
+
+### 8.2 backup.api.API.create
+
+1. 和创建快照类似，都是先获取卷，如果指定了`snapshot_id`，检查快照是否属于该卷，同时检查快照状态是否是`available`，如果没有指定快照，那么卷的状态需要是`["available", "in-use"]`，否则需要强制备份。
+2. 检查并预留备份大小的配额。
+3. 如果是增量备份，那么就查找最新的可用备份作为父备份。
+```python
+ backups = objects.BackupList.get_all_by_volume(...)
+    if backups.objects:
+        latest_backup = max( backups.objects, key=lambda x: x['data_timestamp'] if ... else datetime(...))
+```
+
+4. 构造`ORM`备份对象，状态为`fields.BackupStatus.CREATING`，然后写入数据库，同时更新快照或卷的状态为`fields.SnapshotStatus.BACKING_UP`或`'backing-up'`。
+5. 正常提交配额。
+6. 通过调度器执行备份`self.scheduler_rpcapi.create_backup`。
+
+### 8.3 cinder-scheduler
+
+#### 8.3.1 接口
+调度器的接口是`scheduler.rpcapi.create_backup`，它会向`TOPIC = constants.SCHEDULER_TOPIC`的消息队列发出调用`create_backup`函数的`RPC`请求。
+#### 8.3.2 调度
+`scheduler.manager.SchedulerManager.create_backup`接受调用请求，获取`RPC`的上下文。和创建卷一样，调度器会选择合适的执行节点。如果备份记录没有指定执行主机`host`，则通过驱动的`self.driver.get_backup_host(volume, availability_zone)`为备份选择一个合适的宿主机，对应卷所在的计算节点或者存储节点。最后调用`self.backup_api.create_backup`去执行真正的备份。
+
+### 8.4 cinder-backup
+
+#### 8.4.1 接口
+
+`cinder.backup.rpcapi.BackupAPI.create_backup`会发起`RPC`请求`cctxt.cast(ctxt, 'create_backup', backup=backup)`，它的`TOPIC = constants.BACKUP_TOPIC`。
+
+#### 8.4.2 创建备份
+
+1. `cinder.backup.manager.BackupManager.create_backup`接受调用。它会记录从卷的上一个状态，用于恢复`previous_status = volume.get('previous_status', None)`。然后进行快照或卷的状态检查，和`backup.api.API.create`一致，快照，卷和备份的状态必须正常，对应`backing-up`，`backing-up`和`fields.BackupStatus.CREATING`。如果备份服务不在工作状态`if not self.is_working()`，就会抛出异常。否则就会启动备份`self._start_backup(context, backup, volume)`。
+2. `_start_backup`首先确保备份拥有加密卷的密钥，然后调用`self.volume_rpcapi.get_backup_device`执行获取备份设备的操作。
+
+### 8.5 cinder-volume
+
+#### 8.5.1 接口
+
+`cinder.volume.rpcapi.VolumeAPI.get_backup_device`首先通过`volume.service_topic_queue`获取`PRC`客户端上下文，然后根据不同版本调用`get_backup_device`函数，本质都是获取到指定卷所在的存储后端。
+
+#### 8.5.2 获取备份设备
+
+`volume.manager.VolumeManager.get_backup_device`首先让存储驱动返回可备份的资源和它是否是快照，`(backup_device, is_snapshot) = (self.driver.get_backup_device(ctxt, backup))`，然后对于异步回调，它会调用`rpcapi.continue_backup(ctxt, backup, backup_device)`继续备份流程，否则就直接返回一个`backup_device`（但没有去接收这个返回值）。
+
+#### 8.5.3 继续备份
+
+##### 8.5.3.1接口
+
+`backup.rpcapi.BackupAPI.continue_backup`会根据`backup.host`得到`RPC`上下文，继续调用`BackupManager.continue_backup`。这里的`host`是备份宿主机而不是`get_backup_device`中的源卷所在的存储后端。
+
+##### 8.5.3.2 初始化
+
+`backup.manager.BackupManager.continue_backup`在接收到`RPC`调用后，首先获取需要的对象，包括`volume, snapshot, previous_status, backup_service`以及存储连接的属性`properties`。
+
+##### 8.5.3.3 挂载
+
+将之前获得的`backup_device`通过`self._attach_device`挂载到`BackupManager`所在的节点上。`_attach_device`是一个策略分发方法，对于挂载真实卷调用`_attach_volume`，对于快照调用`_attach_snapshot`。
+
+###### 8.5.3.3.1 挂载卷
+
+`_attach_volume`首先会初始化连接`self.volume_rpcapi.initialize_connection`，通知`volume`需要挂载卷，其次调用`self._connect_device`把卷挂载到本机。`volume.rpcapi.VolumeAPI.initialize_connection`负责发送调用`volume.manager.VolumeManager.initialize_connection`方法的请求，这里使用的是`call`阻塞等待返回连接信息。
+
+###### 8.5.3.3.2 挂载快照
+
+`_attach_snapshot`与挂载卷很类似，不同点在于挂载快照的初始化使用的是`self.volume_rpcapi.initialize_connection_snapshot`，最终`driver`会将快照挂载为只读设备。`volume.rpcapi.VolumeAPI.initialize_connection_snapshot`也是阻塞等待`volume.manager.VolumeManager.initialize_connection_snapshot`返回连接结果。
+
+###### 8.5.3.3.3 连接
+
+无论是卷还是快照最终都是输入连接信息然后`_connect_device`挂载。`_connect_device`首先获取连接信息中的卷/快照的后端类型`protocol`，然后调用`volume_utils.brick_get_connector`获得一个与后端存储通信的对象`connector`，最后调用这个`connector`的`connect_volume`真正的将卷/快照挂载。
+
+###### 8.5.3.3.4 数据流
+
+所有访问块设备的访问都是在源卷节点执行的，例如`get_backup_device`和`initialize_connection`，读取操作是在备份服务节点上，也就是`backup.host`，例如`connector.connect_volume`，挂载点也是在备份服务节点上的，但最终备份的落地位置是在`driver`配置的目标存储中。
+
+![attach](attach.png)
+
+##### 8.5.3.4 备份
+
+调用`backup_service.backup(backup, tpool.Proxy(device_file))`将数据写入到目标存储节点中，`tpool.Proxy(device_file)`代理将`bakcup`中阻塞IO的操作全部放在线程池中进行。
+
+##### 8.5.3.5 卸载
+
+`self._detach_device`，这里无论成功与否都会直接卸载卷或快照，`_detach_device`会通过`connector.disconnect_volume`将卷/快照从备份服务节点卸载，然后再通过`volume.rpc.api.VolumeAPI.terminate_connection`发起`RPC`调用，阻塞的等待`terminate_connection`在源卷端断开连接，然后再调用`volume.rpc.api.VolumeAPI.remove_export`阻塞等待`remove_export`删除源卷在存储后端的导出。
+
+#### 8.5.4 完成备份
+
+`_finish_backup`不做任何数据搬运，它只是做状态更新和日志通知。
+
+1. 在备份完成后调用`self._finish_backup`，首先对对象的状态重新恢复，对于快照直接设置为`fields.SnapshotStatus.AVAILABLE`，对于卷设置为`previous_status`，备份对象的状态更新为`fields.BackupStatus.AVAILABLE`。
+2. 更新增量备份的备份链条，父备份的依赖数`num_dependent_backups`加1。
+3. 通知其他组件`_notify_about_backup_usage`备份结束。
+
+![create_backup](create_backup.png)
+
+#### 8.5.5 RPC调用
+
+##### 8.5.5.1 initialize_connection
+
+`volume.manager.VolumeManager.initialize_connection`首先确认卷的存储后端已经初始化`volume_utils.require_driver_initialized(self.driver)`，然后再后端创建导出信息`self.driver.create_export`，调用驱动初始化`self.driver.initialize_connection`，最后增强得到的挂载卷的详细信息后返回给备份服务节点。
+
+##### 8.5.5.2 terminate_connection
+
+`volume.manager.VolumeManager.terminate_connection`从数据库取出卷对象后，调用卷的存储驱动然后与该连接断开`self.driver.terminate_connection`同时释放资源。
+
+##### 8.5.5.3 remove_export
+
+`volume.manager.VolumeManager.terminate_connection`取出卷信息后调用存储驱动移除对应卷的导出配置`self.driver.remove_export`。
+
+### 8.6 RBDDriver
+
+#### 8.6.1 get_backup_device
+
+`	volume.drivers.rbd.RBDDriver.get_backup_device`对于`Ceph`后端直接返回原始卷对象作为备份源，否则就调用`volume.driver.BaseVD.get_backup_device`，这个父类方法如果可以使用临时快照作为备份源的话就直接返回一个临时快照，否则就会创建一个临时卷作为备份源。
+
+#### 8.6.2 initialize_connection
+
+`volume.drivers.rbd.RBDDriver.initialize_connection`首先会得到`Monitor`的IP列表和端口号`hosts, ports = self._get_mon_addrs()`，然后调用`_get_config_tuple`得到连接`Ceph`集群需要的配置，包括Ceph集群名称，配置文件路径，认证用户名，`Ceph keyring secret ID`，其中`Ceph keyring secret ID`是`libvirt`中用来引用Ceph用户key的UUID，`name, conf, user, secret_uuid`。最后构建一个传给`os-brick`的连接元数据。
+
+#### 8.6.3 terminate_connection和remove_export
+
+`volume.drivers.rbd.RBDDriver.terminate_connection`和`remove_export`都是空实现，因为`RBD`的访问方式是靠Ceph认证和pool权限的，所有节点通过`monnitor`发现`OSD`并直接访问卷数据。当建立连接时客户端得到`Monitor`的地址和认证信息，断开时就代表客户端不再使用这些信息访问`RBD`卷。
+
 
 
