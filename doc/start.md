@@ -2,25 +2,28 @@
 
 ## 1. 入口
 
-- 基于devstack安装
+- 查看服务
 
-    ```sh
-    sudo systemctl status "devstack@c-*
+    ```bash
+    sudo systemctl status openstack-cinder-api
     
-    ● devstack@c-api.service - Devstack devstack@c-api.service
-         Loaded: loaded (/etc/systemd/system/devstack@c-api.service; enabled; preset: enabled)
+    ● openstack-cinder-api.service - OpenStack Cinder API Server
+       Loaded: loaded (/usr/lib/systemd/system/openstack-cinder-api.service; enabled; vendor preset: disabled)
     ```
     
-- 查看 .service config
+- 查看 .service
 
     ```
-     ExecStart = /bin/uwsgi --procname-prefix cinder-api --ini /etc/cinder/cinder-api-uwsgi.ini --venv /opt/stack/data/venv
+    ExecStart=/usr/bin/cinder-api --config-file /usr/share/cinder/cinder-dist.conf --config-file /etc/cinder/cinder.conf --logfile /var/log/cinder/api.log
     ```
 
-- 查看/etc/cinder/cinder-api-uwsgi.ini
+- 查看/usr/bin/cinder-api
 
-    ```
-    module = cinder.wsgi.api:application
+    ```python
+    from cinder.cmd.api import main
+    
+    if __name__ == "__main__":
+        sys.exit(main())
     ```
     
 
