@@ -2,6 +2,7 @@ import webob.exc
 import exception
 import utils
 
+
 class Controller:
     @staticmethod
     def validate_name_and_description(body, check_length=True):
@@ -15,5 +16,3 @@ class Controller:
                         utils.check_string_length(body[attribute], attribute, 0, 255)
                     except exception.InvalidInput as error:
                         raise webob.exc.HTTPBadRequest(explanation=error.message)
-                    
-

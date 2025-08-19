@@ -9,7 +9,7 @@ class BinderException(Exception):
     code = 500
     safe = False
 
-    def __init__(self, message = None, **kwargs):
+    def __init__(self, message=None, **kwargs):
         self.kwargs = kwargs
         if message is not None:
             self.message = message

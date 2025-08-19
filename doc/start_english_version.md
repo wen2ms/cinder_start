@@ -1,8 +1,8 @@
 # Cinder Code Start
 
-## 1. 入口
+## 1. Entrance
 
-- 查看服务
+- View daemon
 
     ```bash
     sudo systemctl status openstack-cinder-api
@@ -11,13 +11,13 @@
        Loaded: loaded (/usr/lib/systemd/system/openstack-cinder-api.service; enabled; vendor preset: disabled)
     ```
     
-- 查看 .service
+- View systemd .service
 
     ```
     ExecStart=/usr/bin/cinder-api --config-file /usr/share/cinder/cinder-dist.conf --config-file /etc/cinder/cinder.conf --logfile /var/log/cinder/api.log
     ```
 
-- 查看/usr/bin/cinder-api
+- View /usr/bin/cinder-api
 
     ```python
     from cinder.cmd.api import main
@@ -27,18 +27,18 @@
     ```
     
 
-## 2. 代码结构
+## 2. Code Structure
 
-- 根目录
+- root directory
 
 ```sh
 .
 ├── api-ref 
 ├── bindep.txt
-├── cinder # cinder核心代码，包含cinder-api,scheduler, volume manager, driver等模块
+├── cinder # cinder core code, including cinder-api, scheduler, volume manager, driver and other modules.
 ├── CONTRIBUTING.rst
-├── conversion # 数据库或配置迁移工具
-├── doc # 文档
+├── conversion # Database and Config transfer tools
+├── doc # Document
 ├── driver-requirements.txt
 ├── etc
 ├── HACKING.rst
@@ -63,15 +63,15 @@
 
 ```sh
 .
-├── api # REST API的定义
+├── api # REST API
 ├── backup
 ├── brick
-├── cmd # 服务入口，cinder-api, cinder-volume
+├── cmd # Service entrance，cinder-api, cinder-volume
 ├── common
 ├── compute
 ├── context.py
 ├── coordination.py
-├── db # 数据库访问层
+├── db # Database server layer
 ├── exception.py
 ├── flow_utils.py
 ├── group
@@ -92,36 +92,36 @@
 ├── quota.py
 ├── quota_utils.py
 ├── rpc.py
-├── scheduler # 调度器，决定存储后端
+├── scheduler # Scheduler, which decides the storage backend
 ├── service_auth.py
 ├── service.py
 ├── ssh_utils.py
-├── tests # 单元测试，使用tox
+├── tests # Unit test，using tox
 ├── transfer
 ├── utils.py
 ├── version.py
-├── volume # 卷管理核心
+├── volume # The core of volume management
 ├── wsgi
 └── zonemanager
 ```
 
 ## 3. Create Volume
-### 3.1 流程
+### 3.1 Flow
 
 ![Create Volume](./create_volume.png)
 
-### 3.2 入口
+### 3.2 Entrance
 
   ``` python
   # cinder.api.v3.volume.VolumeController.create
 
-  # 进入cinder-api层
+  # Enter cinder-api layer
   def create(self, req, body)
 
-  # 封装了认证信息、project、user、权限等
+  # Encapsulates authentication information, projects, users and permissions
   context = req.environ['cinder.context']
 
-  # 调用Volume API
+  # Call Volume API
   # self.volume_api = cinder.volume.cinder_volume.API()
   try:
       new_volume = self.volume_api.create(
@@ -130,12 +130,12 @@
   except exception.VolumeTypeDefaultMisconfiguredError as err:
       raise exc.HTTPInternalServerError(explanation=err.msg)
 
-  # 构建response返回给Client
+  # Construct response to Client
   retval = self._view_builder.detail(req, new_volume)
   return retval
   ```
 
-### 3.3 疑似的bug
+### 3.3 Bug?
 
 ```python
 volume = body['volume']
@@ -144,7 +144,7 @@ kwargs = {}
 self.validate_name_and_description(volume, check_length=False)
 ```
 
-`validate_name_and_description`是用来检查volume的各个属性是否满足一定的条件，它调用的是：
+`validate_name_and_description` is used to check whether the various properties of volume meet the certain conditions. It calls: 
 
 ```python
 # cinder.api.openstack.wsgi
@@ -156,7 +156,7 @@ def validate_name_and_description(body, check_length=True):
         value = body.get(attribute)
         if value is not None:
             if isinstance(value, str):
-                # 疑似bug
+                # bug?
                 body[attribute] = value.strip()
             if check_length:
                 try:
@@ -166,7 +166,7 @@ def validate_name_and_description(body, check_length=True):
                     raise webob.exc.HTTPBadRequest(explanation=error.msg)
 ```
 
-核心函数在`cinder.utils`：
+Core function in `cinder.utils`：
 
 ```python
 def check_string_length(value: str, name: str, min_length: int = 0,
@@ -187,11 +187,11 @@ if not allow_all_spaces and value.isspace():
 ```
 
 
-- 如果一个字符串是空格串，例如`"     "`，那么经过`value.strip`后字符串会变成`""`，长度为0，那么`value.isspace()`为`False`。
+- If a string is a string of spaces, like `"     "`, then after  `value.strip`, the string will become `""` with a length of 0, then `value.isspace()` will be `False`.
 
-- 如果`check_length`为`False`那么就不会检查`value`是否为空格串了。
+- If `check_length` is `False`, then  `value` will not be checked  for spaces.
 
-### 3.4 异常类的分析
+### 3.4 Analysis of exception classes
 
 ```python
 class CinderException(Exception):
@@ -216,19 +216,19 @@ class InvalidInput(Invalid):
     message = "Invalid input received: %(reason)s"
 ```
 
-通过`message = self.message % kwargs`得到格式化后的字符串，例如校验数据过长：
+Get the formatted string through `message = self.message % kwargs` , for example, to check if the data is too long:
 
 ```zsh
 "Invalid input received: %(reason)s" % {"reason": "Failed: Invalid input received: name has 4496 characters, more than 255."}
 ```
 
-### 3.5 构建参数
+### 3.5 Build parameters
 
-大多数传入`self.volume_api.create`的参数通过`volume.get()`直接获取，例如`display_name`, `display_description`, `imageRef`, `metadata`, `availability_zone`, `scheduler_hints`，少部分通过**api调用**：
+Most parameters passed `self.volume_api.create` are directly obtained through `volume.get()`, such as `display_name`, `display_description`, `imageRef`, `metadata`, `availability_zone`, `scheduler_hints`, a few are obtained through **API calls**
 
 ![get_attributes](get_attributes.png)
 
-create volume的时候可以传入一个镜像`imageRef`，cinder-api在收到这个参数时会解析`imageRef`，获取相关镜像信息。如果`imageRef`是一个从快照创建的镜像，也就是说这个镜像是快照的一个副本，那么后续创建时就会通过`snapshot`模式会更快。
+When creating a volume, you can pass in an image `imageRef`, when cinder-api receives this parameter, it will parse the `imageRef` to obtain relevent image information. If `imageRef` is an image created from a snapshot, that is, the image is a copy of the snapshot, then subsequent creation operations will be faster using snapshot mode.
 
 ![nova_image](nova_image.png)
 
@@ -314,13 +314,13 @@ flow_engine = create_volume.get_flow(self.db,
 
 - 构建一个`taskflow`对象，这个任务流是`taskflow.patterns.linear_flow.Flow`顺序执行。添加的任务包括：
 
-| 任务 |功能 |
-| :-----: | :-----: |
-| `ExtractVolumeRequestTask` | 对请求的参数进行提取，处理和验证 |
-| `QuotaReserveTask` | 向系统申请配额 |
-| `EntryCreateTask` | 在数据库中写入新的卷记录，卷状态为`creating` |
-| `QuotaCommitTask` | 锁定配额 |
-| `VolumeCastTask` | 根据是否选择`scheduler`或者选择直接发RPC给`volume`后端 |
+|            任务            |                          功能                          |
+| :------------------------: | :----------------------------------------------------: |
+| `ExtractVolumeRequestTask` |            对请求的参数进行提取，处理和验证            |
+|     `QuotaReserveTask`     |                     向系统申请配额                     |
+|     `EntryCreateTask`      |      在数据库中写入新的卷记录，卷状态为`creating`      |
+|     `QuotaCommitTask`      |                        锁定配额                        |
+|      `VolumeCastTask`      | 根据是否选择`scheduler`或者选择直接发RPC给`volume`后端 |
 
 1. 第一个任务`ExtractVolumeRequestTask`。首先会限制创建卷的方式只能是`snapshot, image, source_volume, backup`四种之一，然后就会检查用户是否有创建卷的权限，提取一系列参数：`snapshot_id, source_volid, backup_id, size, consistencygroup_id, cgsnapshot_id, group_id, image_meta, image_properties`等
 2. 第二个任务`QuotaReserveTask`。它主要由三部分组成`QUOTAS.limit_check`，`QUOTAS.add_volume_type_opts`和`QUOTAS.reserve`，它们分别是检查项目配额是否允许创建这个卷，给配额参数增加卷的限制，向配额系统申请预留资源。
@@ -632,6 +632,3 @@ volume.save()
 #### 8.6.3 terminate_connection和remove_export
 
 `volume.drivers.rbd.RBDDriver.terminate_connection`和`remove_export`都是空实现，因为`RBD`的访问方式是靠Ceph认证和pool权限的，所有节点通过`monnitor`发现`OSD`并直接访问卷数据。当建立连接时客户端得到`Monitor`的地址和认证信息，断开时就代表客户端不再使用这些信息访问`RBD`卷。
-
-
-

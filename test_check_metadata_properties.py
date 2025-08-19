@@ -10,8 +10,8 @@ def test_check_metadata_properties():
         ({"": "value"}, False),
         # empty value
         ({"key": ""}, True),
-        ({"a"*256: "value"}, False),
-        ({"key": "v"*256}, False),
+        ({"a" * 256: "value"}, False),
+        ({"key": "v" * 256}, False),
         ("not a dict", False),
         # non-string value
         ({"key": 123}, False),

@@ -6,6 +6,8 @@ name = "pypi"
 [packages]
 "oslo.utils" = "*"
 webob = "*"
+"oslo.config" = "*"
+flake8 = "*"
 
 [dev-packages]
 
